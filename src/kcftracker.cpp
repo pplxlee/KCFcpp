@@ -88,6 +88,8 @@ the use of this software, even if advised of the possibility of such damage.
 #include "labdata.hpp"
 #endif
 
+#include <corecrt_math_defines.h>
+
 //#define M_PI 3.14159265358979323846
 
 // Constructor

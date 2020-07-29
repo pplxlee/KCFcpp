@@ -8,7 +8,7 @@
 
 #include "kcftracker.hpp"
 
-#include <dirent.h>
+//#include <dirent.h>
 
 using namespace std;
 using namespace cv;
