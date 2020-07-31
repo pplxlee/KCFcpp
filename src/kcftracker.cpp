@@ -89,6 +89,11 @@ the use of this software, even if advised of the possibility of such damage.
 #endif
 
 #include <corecrt_math_defines.h>
+#include <iostream>
+#include <chrono>
+
+using std::cout;
+using std::endl;
 
 //#define M_PI 3.14159265358979323846
 
@@ -96,14 +101,14 @@ the use of this software, even if advised of the possibility of such damage.
 KCFTracker::KCFTracker(const bool& hog, const bool& fixed_window, const bool& multiscale, const bool& lab)
 {
     // Parameters equal in all cases
-    lambda = 0.0001;
-    padding = 2.5;
+    lambda = 0.0001;                // 正则项
+    padding = 2.5;                  // 相对于尺寸的包围区域
     //output_sigma_factor = 0.1;
-    output_sigma_factor = 0.125;
-    _hogfeatures = hog;
-    _labfeatures = lab;
-    _multiscale = multiscale;
-    _fixed_window = fixed_window;
+    output_sigma_factor = 0.125;    // 目标高斯带宽
+    _hogfeatures = hog;             // 使用hog特征
+    _labfeatures = lab;             // lab色空间特征
+    _multiscale = multiscale;       // 多尺度
+    _fixed_window = fixed_window;   // 固定大小
 
     // Set the parameters depending on the KCF mode
     setParameters();
@@ -112,24 +117,24 @@ KCFTracker::KCFTracker(const bool& hog, const bool& fixed_window, const bool& mu
 void KCFTracker::setParameters(){
 if (_hogfeatures) {    // HOG
         // VOT dataset evaluation
-        interp_factor = 0.012;
-        sigma = 0.6;
+        interp_factor = 0.012;  // 用于适应的线性插值因子
+        sigma = 0.6;            // 高斯核带宽
 
         // parameters used for the TPAMI
         //interp_factor = 0.02;
         //sigma = 0.5;
 
-        cell_size = 4;
+        cell_size = 4;          // HOG格子尺寸
         _hogfeatures = true;
 
         if (_labfeatures) {
             interp_factor = 0.005;
             sigma = 0.4;
             //output_sigma_factor = 0.025;
-            output_sigma_factor = 0.1;
+            output_sigma_factor = 0.1;  // 目标高斯带宽
 
-            _labCentroids = cv::Mat(nClusters, 3, CV_32FC1, &data);
-            cell_sizeQ = cell_size*cell_size;
+            _labCentroids = cv::Mat(nClusters, 3, CV_32FC1, &data); // lab
+            cell_sizeQ = cell_size*cell_size;   // cell size^2, to avoid repeated operations
         }
     }
     else {   // RAW
@@ -144,7 +149,7 @@ if (_hogfeatures) {    // HOG
     }
 
     if (_multiscale) { // multiscale
-        template_size = 96;
+        template_size = 96; // make it small
         //template_size = 100;
         scale_step = 1.05;
         scale_weight = 0.95;
@@ -169,12 +174,60 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
 {
     _roi = roi;
     assert(roi.width >= 0 && roi.height >= 0);
-    _tmpl = getFeatures(image, 1);
-    _prob = createGaussianPeak(_size_patch[0], _size_patch[1]);
-    _alphaf = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
+
+    {
+        // 计时开始
+        double ratio = (double)
+            std::chrono::steady_clock::duration::period::num
+            / std::chrono::steady_clock::duration::period::den;
+        auto start = std::chrono::steady_clock::now();
+        _tmpl = getFeatures(image, 1);
+        // 计时结束并打印计时
+        auto end = std::chrono::steady_clock::now();
+        cout << "Init getFeatures: "
+            << (end - start).count() * ratio << endl;
+    }
+
+    {
+        // 计时开始
+        double ratio = (double)
+            std::chrono::steady_clock::duration::period::num
+            / std::chrono::steady_clock::duration::period::den;
+        auto start = std::chrono::steady_clock::now();
+        _prob = createGaussianPeak(_size_patch[0], _size_patch[1]);
+        // 计时结束并打印计时
+        auto end = std::chrono::steady_clock::now();
+        cout << "Init createGaussianPeak: "
+            << (end - start).count() * ratio << endl;
+    }
+
+    {
+        // 计时开始
+        double ratio = (double)
+            std::chrono::steady_clock::duration::period::num
+            / std::chrono::steady_clock::duration::period::den;
+        auto start = std::chrono::steady_clock::now();
+        _alphaf = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
+        // 计时结束并打印计时
+        auto end = std::chrono::steady_clock::now();
+        cout << "Init _alphaf: "
+            << (end - start).count() * ratio << endl;
+    }
+
     //_num = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
     //_den = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
-    train(_tmpl, 1.0); // train with initial frame
+    {
+        // 计时开始
+        double ratio = (double)
+            std::chrono::steady_clock::duration::period::num
+            / std::chrono::steady_clock::duration::period::den;
+        auto start = std::chrono::steady_clock::now();
+        train(_tmpl, 1.0); // train with initial frame
+        // 计时结束并打印计时
+        auto end = std::chrono::steady_clock::now();
+        cout << "Init train: "
+            << (end - start).count() * ratio << endl;
+    }
  }
 
 // Update position based on the new frame
@@ -190,12 +243,42 @@ cv::Rect KCFTracker::update(const cv::Mat& image)
 
 
     float peak_value;
-    cv::Point2f res = detect(_tmpl, getFeatures(image, 0, 1.0f), peak_value);
+
+    // 三线程？
+    double ratio = (double)
+        std::chrono::steady_clock::duration::period::num
+        / std::chrono::steady_clock::duration::period::den;
+    std::chrono::steady_clock::time_point start, end;
+    cv::Point2f res;
+    {
+        start = std::chrono::steady_clock::now();
+        auto features = getFeatures(image, 0, 1.0f);
+        end = std::chrono::steady_clock::now();
+        cout << "Update getFeatures 1: "
+            << (end - start).count() * ratio << endl;
+
+        start = std::chrono::steady_clock::now();
+        res = detect(_tmpl, features, peak_value);
+        end = std::chrono::steady_clock::now();
+        cout << "Update detect 1: "
+            << (end - start).count() * ratio << endl;
+    }
 
     if (scale_step != 1) {
         // Test at a smaller _scale
         float new_peak_value;
-        cv::Point2f new_res = detect(_tmpl, getFeatures(image, 0, 1.0f / scale_step), new_peak_value);
+
+        start = std::chrono::steady_clock::now();
+        auto features = getFeatures(image, 0, 1.0f / scale_step);
+        end = std::chrono::steady_clock::now();
+        cout << "Update getFeatures 2: "
+            << (end - start).count() * ratio << endl;
+
+        start = std::chrono::steady_clock::now();
+        cv::Point2f new_res = detect(_tmpl, features, new_peak_value);
+        end = std::chrono::steady_clock::now();
+        cout << "Update detect 2: "
+            << (end - start).count() * ratio << endl;
 
         if (scale_weight * new_peak_value > peak_value) {
             res = new_res;
@@ -206,7 +289,17 @@ cv::Rect KCFTracker::update(const cv::Mat& image)
         }
 
         // Test at a bigger _scale
-        new_res = detect(_tmpl, getFeatures(image, 0, scale_step), new_peak_value);
+        start = std::chrono::steady_clock::now();
+        features = getFeatures(image, 0, scale_step);
+        end = std::chrono::steady_clock::now();
+        cout << "Update getFeatures 3: "
+            << (end - start).count() * ratio << endl;
+
+        start = std::chrono::steady_clock::now();
+        new_res = detect(_tmpl, features, new_peak_value);
+        end = std::chrono::steady_clock::now();
+        cout << "Update detect 3: "
+            << (end - start).count() * ratio << endl;
 
         if (scale_weight * new_peak_value > peak_value) {
             res = new_res;
@@ -227,8 +320,20 @@ cv::Rect KCFTracker::update(const cv::Mat& image)
     if (_roi.y + _roi.height <= 0) _roi.y = -_roi.height + 2;
 
     assert(_roi.width >= 0 && _roi.height >= 0);
+
+
+    start = std::chrono::steady_clock::now();
     cv::Mat x = getFeatures(image, 0);
+    end = std::chrono::steady_clock::now();
+    cout << "Update getFeatures x: "
+        << (end - start).count() * ratio << endl;
+
+
+    start = std::chrono::steady_clock::now();
     train(x, interp_factor);
+    end = std::chrono::steady_clock::now();
+    cout << "Update train x: "
+        << (end - start).count() * ratio << endl;
 
     return _roi;
 }
@@ -357,6 +462,7 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
         setInitialTemplateSize();
     }
 
+    // extracted_roi为模版在实际图片中对应的区域
     extracted_roi.width = scale_adjust * _scale * _tmpl_sz.width;
     extracted_roi.height = scale_adjust * _scale * _tmpl_sz.height;
 
@@ -365,15 +471,17 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
     extracted_roi.y = cy - extracted_roi.height / 2;
 
     cv::Mat FeaturesMap;
+    // z为模版图片
     cv::Mat z = RectTools::subwindow(image, extracted_roi, cv::BORDER_REPLICATE);
 
+    // 将z缩放为模版大小
     if (z.cols != _tmpl_sz.width || z.rows != _tmpl_sz.height) {
         cv::resize(z, z, _tmpl_sz);
     }
 
     // HOG features
     if (_hogfeatures) {
-        getHogFeatures(z, FeaturesMap);
+        getHogFeatures(z, FeaturesMap); // 计算hog特征
 
         // Lab features
         if (_labfeatures) {
@@ -385,7 +493,7 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
     }
 
     if (inithann) {
-        createHanningMats();
+        createHanningMats();    // 考虑可以预先生成_hann
     }
     FeaturesMap = _hann.mul(FeaturesMap);
     return FeaturesMap;
@@ -464,6 +572,7 @@ void KCFTracker::setInitialTemplateSize(){
     const int padded_w = _roi.width * padding;
     const int padded_h = _roi.height * padding;
 
+    // template_size = 96 padded = {192, 96} 则 _scale = 2 _tmpl_sz = {96, 48}
     if (template_size > 1) {  // Fit largest dimension to the given template size
         if (padded_w >= padded_h)  //fit to width
             _scale = padded_w / (float) template_size;
@@ -490,8 +599,10 @@ void KCFTracker::setInitialTemplateSize(){
         }*/
     }
 
+    // _tmpl_sz = {96, 48} cell_size = 4 则 _tmpl_sz = {104, 56}
     if (_hogfeatures) {
         // Round to cell size and also make it even
+        // 让_tmpl_sz为奇数个2*cell
         _tmpl_sz.width = ( ( (int)(_tmpl_sz.width / (2 * cell_size)) ) * 2 * cell_size ) + cell_size*2;
         _tmpl_sz.height = ( ( (int)(_tmpl_sz.height / (2 * cell_size)) ) * 2 * cell_size ) + cell_size*2;
     }
