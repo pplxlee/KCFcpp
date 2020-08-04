@@ -89,6 +89,7 @@ the use of this software, even if advised of the possibility of such damage.
 #endif
 
 #include "utils.hpp"
+#include "threadpool.hpp"
 
 #include <corecrt_math_defines.h>
 #include <iostream>
@@ -103,8 +104,29 @@ using std::endl;
 
 //#define M_PI 3.14159265358979323846
 
+
+class KCFTracker::MultiThreadHelper
+{
+public:
+    fixed_thread_pool thread_pool;
+    float peak_values[3];
+    cv::Point2f res_pos[3];
+    int processed_cnt;
+    std::mutex mtx;
+    std::condition_variable cond;
+
+    KCFTracker::MultiThreadHelper() 
+        : thread_pool(2)
+        , peak_values{}
+        , res_pos{}
+        , processed_cnt(0)
+    {
+    }
+};
+
+
 // Constructor
-KCFTracker::KCFTracker(const bool& lab)
+KCFTracker::KCFTracker(const bool& lab, const bool& multi_thread)
 {
     // Parameters equal in all cases
     lambda = 0.0001;                // 正则项
@@ -115,6 +137,13 @@ KCFTracker::KCFTracker(const bool& lab)
 
     // Set the parameters depending on the KCF mode
     setParameters();
+
+    multi_thread_helper_ = multi_thread ? new MultiThreadHelper() : nullptr;
+}
+
+KCFTracker::~KCFTracker()
+{
+    delete multi_thread_helper_;
 }
 
 void KCFTracker::setParameters(){
@@ -160,7 +189,7 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-        _tmpl = getFeatures(image, 1);
+        _tmpl = getFeatures(image, 1, _size_patch);
 #ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
@@ -212,7 +241,7 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-        train(_tmpl, 1.0); // train with initial frame
+        train(_tmpl, 1.0, _size_patch); // train with initial frame
 #ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
@@ -235,96 +264,164 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 
 
     float peak_value;
-
-    // 三线程？
-#ifdef TIME_TEST
-    double ratio = (double)
-        std::chrono::steady_clock::duration::period::num
-        / std::chrono::steady_clock::duration::period::den;
-    std::chrono::steady_clock::time_point start, end;
-#endif // TIME_TEST
     cv::Point2f res;
+    if (multi_thread_helper_)
     {
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        auto features = getFeatures(image, 0, 1.0f);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update getFeatures 1: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
+        // 多线程
+        {
+            std::unique_lock<std::mutex> lk(multi_thread_helper_->mtx);
+            multi_thread_helper_->processed_cnt = 0;
+            multi_thread_helper_->mtx.unlock();
+            multi_thread_helper_->thread_pool.execute([this, &image] {
+                thread_local static int size_patch[3];
+                auto features = getFeatures(image, false, size_patch, 1.0f / scale_step);
+                multi_thread_helper_->res_pos[1] = detect(_tmpl, features, multi_thread_helper_->peak_values[1], size_patch);
+                multi_thread_helper_->mtx.lock();
+                if ((++multi_thread_helper_->processed_cnt) >= 2)
+                {
+                    multi_thread_helper_->mtx.unlock();
+                    multi_thread_helper_->cond.notify_all();
+                }
+                else
+                {
+                    multi_thread_helper_->mtx.unlock();
+                }
+            });
+            multi_thread_helper_->thread_pool.execute([this, &image] {
+                thread_local static int size_patch[3];
+                auto features = getFeatures(image, false, size_patch, scale_step);
+                multi_thread_helper_->res_pos[2] = detect(_tmpl, features, multi_thread_helper_->peak_values[2], size_patch);
+                multi_thread_helper_->mtx.lock();
+                if ((++multi_thread_helper_->processed_cnt) >= 2)
+                {
+                    multi_thread_helper_->mtx.unlock();
+                    multi_thread_helper_->cond.notify_all();
+                }
+                else
+                {
+                    multi_thread_helper_->mtx.unlock();
+                }
+            });
 
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        res = detect(_tmpl, features, peak_value);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update detect 1: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
-    }
+            auto features = getFeatures(image, false, _size_patch, 1.0f);
+            multi_thread_helper_->res_pos[0] = detect(_tmpl, features, multi_thread_helper_->peak_values[0], _size_patch);
+            multi_thread_helper_->mtx.lock();
+            if ((multi_thread_helper_->processed_cnt) < 2)
+            {
+                multi_thread_helper_->cond.wait(lk);
+            }
+        }
 
-    if (scale_step != 1) {
-        // Test at a smaller _scale
-        float new_peak_value;
+        peak_value = multi_thread_helper_->peak_values[0];
+        res = multi_thread_helper_->res_pos[0];
 
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        auto features = getFeatures(image, 0, 1.0f / scale_step);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update getFeatures 2: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
-
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        cv::Point2f new_res = detect(_tmpl, features, new_peak_value);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update detect 2: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
-
-        if (scale_weight * new_peak_value > peak_value) {
-            res = new_res;
-            peak_value = new_peak_value;
+        if (peak_value < scale_weight * multi_thread_helper_->peak_values[1])
+        {
+            res = multi_thread_helper_->res_pos[1];
+            peak_value = multi_thread_helper_->peak_values[1];
             _scale /= scale_step;
             _roi.width /= scale_step;
             _roi.height /= scale_step;
         }
-
-        // Test at a bigger _scale
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        features = getFeatures(image, 0, scale_step);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update getFeatures 3: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
-
-#ifdef TIME_TEST
-        start = std::chrono::steady_clock::now();
-#endif // TIME_TEST
-        new_res = detect(_tmpl, features, new_peak_value);
-#ifdef TIME_TEST
-        end = std::chrono::steady_clock::now();
-        cout << "Update detect 3: "
-            << (end - start).count() * ratio << endl;
-#endif // TIME_TEST
-
-        if (scale_weight * new_peak_value > peak_value) {
-            res = new_res;
-            peak_value = new_peak_value;
+        if (peak_value < scale_weight * multi_thread_helper_->peak_values[2])
+        {
+            res = multi_thread_helper_->res_pos[2];
+            peak_value = multi_thread_helper_->peak_values[2];
             _scale *= scale_step;
             _roi.width *= scale_step;
             _roi.height *= scale_step;
+        }
+    }
+    else
+    {
+#ifdef TIME_TEST
+        double ratio = (double)
+            std::chrono::steady_clock::duration::period::num
+            / std::chrono::steady_clock::duration::period::den;
+        std::chrono::steady_clock::time_point start, end;
+#endif // TIME_TEST
+        {
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            auto features = getFeatures(image, 0, _size_patch, 1.0f);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update getFeatures 1: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            res = detect(_tmpl, features, peak_value, _size_patch);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update detect 1: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+        }
+
+        if (scale_step != 1) {
+            // Test at a smaller _scale
+            float new_peak_value;
+
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            auto features = getFeatures(image, 0, _size_patch, 1.0f / scale_step);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update getFeatures 2: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            cv::Point2f new_res = detect(_tmpl, features, new_peak_value, _size_patch);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update detect 2: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
+            if (scale_weight * new_peak_value > peak_value) {
+                res = new_res;
+                peak_value = new_peak_value;
+                _scale /= scale_step;
+                _roi.width /= scale_step;
+                _roi.height /= scale_step;
+            }
+
+            // Test at a bigger _scale
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            features = getFeatures(image, 0, _size_patch, scale_step);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update getFeatures 3: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
+#ifdef TIME_TEST
+            start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
+            new_res = detect(_tmpl, features, new_peak_value, _size_patch);
+#ifdef TIME_TEST
+            end = std::chrono::steady_clock::now();
+            cout << "Update detect 3: "
+                << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
+            if (scale_weight * new_peak_value > peak_value) {
+                res = new_res;
+                peak_value = new_peak_value;
+                _scale *= scale_step;
+                _roi.width *= scale_step;
+                _roi.height *= scale_step;
+            }
         }
     }
 
@@ -344,7 +441,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 #ifdef TIME_TEST
     start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-    cv::Mat x = getFeatures(image, 0);
+    cv::Mat x = getFeatures(image, 0, _size_patch);
 #ifdef TIME_TEST
     end = std::chrono::steady_clock::now();
     cout << "Update getFeatures x: "
@@ -355,7 +452,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
     start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
     if(prob > interp_threshold)
-        train(x, interp_factor);
+        train(x, interp_factor, _size_patch);
 #ifdef TIME_TEST
     end = std::chrono::steady_clock::now();
     cout << "Update train x: "
@@ -366,11 +463,11 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 }
 
 // Detect object in the current frame.
-cv::Point2f KCFTracker::detect(const cv::Mat& z, const cv::Mat& x, float &peak_value)
+cv::Point2f KCFTracker::detect(const cv::Mat& z, const cv::Mat& x, float &peak_value, int* size_patch)
 {
     using namespace FFTTools;
 
-    cv::Mat k = gaussianCorrelation(x, z);
+    cv::Mat k = gaussianCorrelation(x, z, size_patch);
     cv::Mat res = (real(fftd(complexMultiplication(_alphaf, fftd(k)), true)));
 
     //minMaxLoc only accepts doubles for the peak, and integer points for the coordinates
@@ -397,11 +494,11 @@ cv::Point2f KCFTracker::detect(const cv::Mat& z, const cv::Mat& x, float &peak_v
 }
 
 // train tracker with a single image
-void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor)
+void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor, int* size_patch)
 {
     using namespace FFTTools;
 
-    const cv::Mat k = gaussianCorrelation(x);
+    const cv::Mat k = gaussianCorrelation(x, size_patch);
     const cv::Mat alphaf = complexDivision(_prob, (fftd(k) + lambda));
 
     _tmpl = (1 - train_interp_factor) * _tmpl + (train_interp_factor) * x;
@@ -409,25 +506,24 @@ void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor)
 }
 
 // Evaluates a Gaussian kernel with bandwidth SIGMA for all relative shifts between input images X and Y, which must both be MxN. They must    also be periodic (ie., pre-processed with a cosine window).
-cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2)
+cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2, int* size_patch)
 {
     using namespace FFTTools;
-    cv::Mat c = cv::Mat(cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0));
+    cv::Mat c = cv::Mat(cv::Size(size_patch[1], size_patch[0]), CV_32F, cv::Scalar(0));
     // HOG features
     cv::Mat caux;
     cv::Mat x1aux;
     cv::Mat x2aux;
-    for (int i = 0; i < _size_patch[2]; i++) {
-        x1aux = x1.row(i).reshape(1, _size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
-        //x1aux = x1aux.reshape(1, _size_patch[0]);
-        x2aux = x2.row(i).reshape(1, _size_patch[0]);
+    for (int i = 0; i < size_patch[2]; i++) {
+        x1aux = x1.row(i).reshape(1, size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
+        x2aux = x2.row(i).reshape(1, size_patch[0]);
         cv::mulSpectrums(fftd(x1aux), fftd(x2aux), caux, 0, true);
         caux = fftd(caux, true);
         addRearrangeReal_float(c, caux);
     }
 
     float x1_x2_pow2_sum = sumPow2_ch1(x1) + sumPow2_ch1(x2);
-    float size_patch_den = 1.f / (_size_patch[0] * _size_patch[1] * _size_patch[2]);
+    float size_patch_den = 1.f / (size_patch[0] * size_patch[1] * size_patch[2]);
     float sigma_pow2_den = 1.f / (sigma * sigma);
     float* c_data = (float*)c.data;
     for (int i = 0; i < c.rows * c.cols; ++i)
@@ -438,15 +534,15 @@ cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2)
     return c;
 }
 
-cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x)
+cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x, int* size_patch)
 {
     using namespace FFTTools;
-    cv::Mat c = cv::Mat(cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0));
+    cv::Mat c = cv::Mat(cv::Size(size_patch[1], size_patch[0]), CV_32F, cv::Scalar(0));
     // HOG features
     cv::Mat caux;
     cv::Mat xaux;
-    for (int i = 0; i < _size_patch[2]; i++) {
-        xaux = x.row(i).reshape(1, _size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
+    for (int i = 0; i < size_patch[2]; i++) {
+        xaux = x.row(i).reshape(1, size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
         cv::Mat xaux_fftd = fftd(xaux);
         cv::mulSpectrums(xaux_fftd, xaux_fftd, caux, 0, true);
         caux = fftd(caux, true);
@@ -454,7 +550,7 @@ cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x)
     }
 
     float x_x_pow2_sum = 2 * sumPow2_ch1(x);
-    float size_patch_den = 1.f / (_size_patch[0] * _size_patch[1] * _size_patch[2]);
+    float size_patch_den = 1.f / (size_patch[0] * size_patch[1] * size_patch[2]);
     float sigma_pow2_den = 1.f / (sigma * sigma);
     float* c_data = (float*)c.data;
     for (int i = 0; i < c.rows * c.cols; ++i)
@@ -490,7 +586,7 @@ cv::Mat KCFTracker::createGaussianPeak(const size_t& sizey, const size_t& sizex)
 }
 
 // Obtain sub-window from image, with replication-padding and extract features
-cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, const float& scale_adjust)
+cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, int* size_patch, const float& scale_adjust)
 {
     cv::Rect extracted_roi;
 
@@ -519,44 +615,46 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
     }
 
     // HOG features
-    getHogFeatures(z, FeaturesMap); // 计算hog特征
+    getHogFeatures(z, FeaturesMap, size_patch); // 计算hog特征
 
     // Lab features
     if (_labfeatures) {
-        getLabFeatures(z, FeaturesMap);
+        getLabFeatures(z, FeaturesMap, size_patch[0] * size_patch[1], size_patch);
     }
 
     if (inithann) {
-        createHanningMats();    // 考虑可以预先生成_hann
+        createHanningMats(size_patch);    // 考虑可以预先生成_hann
     }
     //FeaturesMap = _hann.mul(FeaturesMap);
     mul(FeaturesMap, _hann);
     return FeaturesMap;
 }
 
-void KCFTracker::getHogFeatures(const cv::Mat& z, cv::Mat& featureMap){
+void KCFTracker::getHogFeatures(const cv::Mat& z, cv::Mat& featureMap, int* size_patch){
     const IplImage z_ipl = z;
     CvLSVMFeatureMapCaskade *map;
     getFeatureMaps(&z_ipl, cell_size, &map);
     normalizeAndTruncate(map,0.2f);
     PCAFeatureMaps(map);
-    _size_patch[0] = map->sizeY;
-    _size_patch[1] = map->sizeX;
-    _size_patch[2] = map->numFeatures;
+
+    size_patch[0] = map->sizeY;
+    size_patch[1] = map->sizeX;
+    size_patch[2] = map->numFeatures;
 
     featureMap = cv::Mat(cv::Size(map->numFeatures,map->sizeX*map->sizeY), CV_32F, map->map);  // Procedure do deal with cv::Mat multichannel bug
     featureMap = featureMap.t();
     freeFeatureMapObject(&map);
 }
 
-void KCFTracker::getLabFeatures(const cv::Mat& z, cv::Mat& featureMap){
+void KCFTracker::getLabFeatures(const cv::Mat& z, cv::Mat& featureMap, int ele_num, int* size_patch){
     cv::Mat imgLab;
     cvtColor(z, imgLab, CV_BGR2Lab);
     unsigned char *input = (unsigned char*)(imgLab.data);
 
     // Sparse output vector
-    cv::Mat outputLab = cv::Mat(_labCentroids.rows, _size_patch[0]*_size_patch[1], CV_32F, float(0));
+    cv::Mat outputLab = cv::Mat(_labCentroids.rows, ele_num, CV_32F, float(0));
 
+    float* outputLab_data = (float*)outputLab.data;
     int cntCell = 0;
     // Iterate through each cell
     for (int cY = cell_size; cY < z.rows-cell_size; cY+=cell_size){
@@ -583,15 +681,14 @@ void KCFTracker::getLabFeatures(const cv::Mat& z, cv::Mat& featureMap){
                         }
                     }
                     // Store result at output
-                    outputLab.at<float>(minIdx, cntCell) += 1.0 / cell_sizeQ;
-                    //((float*) outputLab.data)[minIdx * (_size_patch[0]*_size_patch[1]) + cntCell] += 1.0 / cell_sizeQ;
+                    outputLab_data[minIdx * ele_num + cntCell] += 1.0f / cell_sizeQ;
                 }
             }
             cntCell++;
         }
     }
     // Update _size_patch[2] and add features to featureMap
-    _size_patch[2] += _labCentroids.rows;
+    size_patch[2] += _labCentroids.rows;
     featureMap.push_back(outputLab);
 }
 
@@ -633,10 +730,10 @@ void KCFTracker::setInitialTemplateSize(){
 }
 
 // Initialize Hanning window. Function called only in the first frame.
-void KCFTracker::createHanningMats()
+void KCFTracker::createHanningMats(int *size_patch)
 {
-    cv::Mat hann1t = cv::Mat(cv::Size(_size_patch[1],1), CV_32F, cv::Scalar(0));
-    cv::Mat hann2t = cv::Mat(cv::Size(1,_size_patch[0]), CV_32F, cv::Scalar(0));
+    cv::Mat hann1t = cv::Mat(cv::Size(size_patch[1],1), CV_32F, cv::Scalar(0));
+    cv::Mat hann2t = cv::Mat(cv::Size(1, size_patch[0]), CV_32F, cv::Scalar(0));
 
     for (int i = 0; i < hann1t.cols; i++)
         hann1t.at<float > (0, i) = 0.5 * (1 - std::cos(2 * M_PI * i / (hann1t.cols - 1)));
@@ -646,9 +743,9 @@ void KCFTracker::createHanningMats()
     const cv::Mat hann2d = hann2t * hann1t;
     // HOG features
     const cv::Mat hann1d = hann2d.reshape(1, 1); // Procedure do deal with cv::Mat multichannel bug
-    _hann = cv::Mat(cv::Size(_size_patch[0] * _size_patch[1], _size_patch[2]), CV_32F, cv::Scalar(0));
-    for (int i = 0; i < _size_patch[2]; i++) {
-        for (int j = 0; j < _size_patch[0] * _size_patch[1]; j++) {
+    _hann = cv::Mat(cv::Size(size_patch[0] * size_patch[1], size_patch[2]), CV_32F, cv::Scalar(0));
+    for (int i = 0; i < size_patch[2]; i++) {
+        for (int j = 0; j < size_patch[0] * size_patch[1]; j++) {
             _hann.at<float>(i, j) = hann1d.at<float>(0, j);
         }
     }
