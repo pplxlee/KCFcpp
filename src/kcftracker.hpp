@@ -98,7 +98,7 @@ public:
     virtual void init(const cv::Rect &roi, const cv::Mat& image);
     
     // Update position based on the new frame
-    virtual cv::Rect update(const cv::Mat& image);
+    virtual cv::Rect update(const cv::Mat& image, float& prob);
 
     float interp_factor; // linear interpolation factor for adaptation
     float sigma; // gaussian kernel bandwidth

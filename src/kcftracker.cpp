@@ -231,7 +231,7 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
  }
 
 // Update position based on the new frame
-cv::Rect KCFTracker::update(const cv::Mat& image)
+cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 {
     if (_roi.x + _roi.width <= 0) _roi.x = -_roi.width + 1;
     if (_roi.y + _roi.height <= 0) _roi.y = -_roi.height + 1;
@@ -309,6 +309,8 @@ cv::Rect KCFTracker::update(const cv::Mat& image)
             _roi.height *= scale_step;
         }
     }
+
+    prob = peak_value;
 
     // Adjust by cell size and _scale
     _roi.x = cx - _roi.width / 2.0f + ((float) res.x * cell_size * _scale);
