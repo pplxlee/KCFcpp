@@ -92,6 +92,10 @@ the use of this software, even if advised of the possibility of such damage.
 #include <iostream>
 #include <chrono>
 
+
+//#define TIME_TEST   1
+
+
 using std::cout;
 using std::endl;
 
@@ -178,57 +182,72 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
     assert(roi.width >= 0 && roi.height >= 0);
 
     {
+#ifdef TIME_TEST
         // 计时开始
         double ratio = (double)
             std::chrono::steady_clock::duration::period::num
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         _tmpl = getFeatures(image, 1);
+#ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
         cout << "Init getFeatures: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
     }
 
     {
+#ifdef TIME_TEST
         // 计时开始
         double ratio = (double)
             std::chrono::steady_clock::duration::period::num
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         _prob = createGaussianPeak(_size_patch[0], _size_patch[1]);
+#ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
         cout << "Init createGaussianPeak: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
+
     }
 
     {
+#ifdef TIME_TEST
         // 计时开始
         double ratio = (double)
             std::chrono::steady_clock::duration::period::num
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         _alphaf = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
+#ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
         cout << "Init _alphaf: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
     }
 
-    //_num = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
-    //_den = cv::Mat(_size_patch[0], _size_patch[1], CV_32FC2, float(0));
     {
+#ifdef TIME_TEST
         // 计时开始
         double ratio = (double)
             std::chrono::steady_clock::duration::period::num
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         train(_tmpl, 1.0); // train with initial frame
+#ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
         cout << "Init train: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
     }
  }
 
@@ -247,40 +266,58 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
     float peak_value;
 
     // 三线程？
+#ifdef TIME_TEST
     double ratio = (double)
         std::chrono::steady_clock::duration::period::num
         / std::chrono::steady_clock::duration::period::den;
     std::chrono::steady_clock::time_point start, end;
+#endif // TIME_TEST
     cv::Point2f res;
     {
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         auto features = getFeatures(image, 0, 1.0f);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update getFeatures 1: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         res = detect(_tmpl, features, peak_value);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update detect 1: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
     }
 
     if (scale_step != 1) {
         // Test at a smaller _scale
         float new_peak_value;
 
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         auto features = getFeatures(image, 0, 1.0f / scale_step);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update getFeatures 2: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         cv::Point2f new_res = detect(_tmpl, features, new_peak_value);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update detect 2: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
         if (scale_weight * new_peak_value > peak_value) {
             res = new_res;
@@ -291,17 +328,25 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
         }
 
         // Test at a bigger _scale
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         features = getFeatures(image, 0, scale_step);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update getFeatures 3: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
+#ifdef TIME_TEST
         start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
         new_res = detect(_tmpl, features, new_peak_value);
+#ifdef TIME_TEST
         end = std::chrono::steady_clock::now();
         cout << "Update detect 3: "
             << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
         if (scale_weight * new_peak_value > peak_value) {
             res = new_res;
@@ -325,20 +370,26 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 
     assert(_roi.width >= 0 && _roi.height >= 0);
 
-
+#ifdef TIME_TEST
     start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
     cv::Mat x = getFeatures(image, 0);
+#ifdef TIME_TEST
     end = std::chrono::steady_clock::now();
     cout << "Update getFeatures x: "
         << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
-
+#ifdef TIME_TEST
     start = std::chrono::steady_clock::now();
+#endif // TIME_TEST
     if(prob > interp_threshold)
         train(x, interp_factor);
+#ifdef TIME_TEST
     end = std::chrono::steady_clock::now();
     cout << "Update train x: "
         << (end - start).count() * ratio << endl;
+#endif // TIME_TEST
 
     return _roi;
 }
