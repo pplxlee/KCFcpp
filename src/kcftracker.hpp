@@ -146,7 +146,11 @@ protected:
     void createHanningMats(int *size_patch);
 
     // Calculate sub-pixel peak for one dimension
-    float subPixelPeak(const float& left, const float& center, const float& right);
+    float subPixelPeak(const float& left, const float& center, const float& right)
+    {
+        const float divisor = 2 * center - right - left;
+        return ((divisor == 0) ? 0 : (0.5f * (right - left) / divisor));
+    }
 
     cv::Mat _alphaf;
     cv::Mat _prob;

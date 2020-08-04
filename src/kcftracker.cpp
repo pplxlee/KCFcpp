@@ -742,12 +742,3 @@ void KCFTracker::createHanningMats(int *size_patch)
         }
     }
 }
-
-// Calculate sub-pixel peak for one dimension
-float KCFTracker::subPixelPeak(const float& left, const float& center, const float& right)
-{
-    const float divisor = 2 * center - right - left;
-    if (divisor == 0)
-        return 0;
-    return 0.5 * (right - left) / divisor;
-}
