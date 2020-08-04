@@ -101,6 +101,7 @@ public:
     virtual cv::Rect update(const cv::Mat& image, float& prob);
 
     float interp_factor; // linear interpolation factor for adaptation
+    float interp_threshold; // the threshold for linear interpolation
     float sigma; // gaussian kernel bandwidth
     float lambda; // regularization
     int cell_size; // HOG cell size

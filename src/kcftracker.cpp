@@ -118,6 +118,7 @@ void KCFTracker::setParameters(){
 if (_hogfeatures) {    // HOG
         // VOT dataset evaluation
         interp_factor = 0.012;  // 用于适应的线性插值因子
+        interp_threshold = 0.4;
         sigma = 0.6;            // 高斯核带宽
 
         // parameters used for the TPAMI
@@ -129,6 +130,7 @@ if (_hogfeatures) {    // HOG
 
         if (_labfeatures) {
             interp_factor = 0.005;
+            interp_threshold = 0.25;
             sigma = 0.4;
             //output_sigma_factor = 0.025;
             output_sigma_factor = 0.1;  // 目标高斯带宽
@@ -332,7 +334,8 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 
 
     start = std::chrono::steady_clock::now();
-    train(x, interp_factor);
+    if(prob > interp_threshold)
+        train(x, interp_factor);
     end = std::chrono::steady_clock::now();
     cout << "Update train x: "
         << (end - start).count() * ratio << endl;
