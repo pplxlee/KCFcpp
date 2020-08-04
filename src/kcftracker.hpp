@@ -92,7 +92,7 @@ class KCFTracker : public Tracker
 {
 public:
     // Constructor
-    KCFTracker(const bool& hog = true, const bool& fixed_window = true, const bool& multiscale = true, const bool& lab = true);
+    KCFTracker(const bool& lab = true);
 
     // Initialize tracker 
     virtual void init(const cv::Rect &roi, const cv::Mat& image);
@@ -162,8 +162,8 @@ private:
     cv::Size _tmpl_sz;
     float _scale;
     int _gaussian_size;
-    bool _hogfeatures;
+    //bool _hogfeatures;
     bool _labfeatures;
-    bool _multiscale;
-    bool _fixed_window;
+    //bool _multiscale;
+    //bool _fixed_window;
 };

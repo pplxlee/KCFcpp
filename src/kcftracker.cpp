@@ -102,77 +102,46 @@ using std::endl;
 //#define M_PI 3.14159265358979323846
 
 // Constructor
-KCFTracker::KCFTracker(const bool& hog, const bool& fixed_window, const bool& multiscale, const bool& lab)
+KCFTracker::KCFTracker(const bool& lab)
 {
     // Parameters equal in all cases
     lambda = 0.0001;                // 正则项
     padding = 2.5;                  // 相对于尺寸的包围区域
     //output_sigma_factor = 0.1;
     output_sigma_factor = 0.125;    // 目标高斯带宽
-    _hogfeatures = hog;             // 使用hog特征
     _labfeatures = lab;             // lab色空间特征
-    _multiscale = multiscale;       // 多尺度
-    _fixed_window = fixed_window;   // 固定大小
 
     // Set the parameters depending on the KCF mode
     setParameters();
 }
 
 void KCFTracker::setParameters(){
-if (_hogfeatures) {    // HOG
-        // VOT dataset evaluation
-        interp_factor = 0.012;  // 用于适应的线性插值因子
-        interp_threshold = 0.4;
-        sigma = 0.6;            // 高斯核带宽
 
-        // parameters used for the TPAMI
-        //interp_factor = 0.02;
-        //sigma = 0.5;
+    // VOT dataset evaluation
+    interp_factor = 0.012;  // 用于适应的线性插值因子
+    interp_threshold = 0.4;
+    sigma = 0.6;            // 高斯核带宽
 
-        cell_size = 4;          // HOG格子尺寸
-        _hogfeatures = true;
+    // parameters used for the TPAMI
+    //interp_factor = 0.02;
+    //sigma = 0.5;
 
-        if (_labfeatures) {
-            interp_factor = 0.005;
-            interp_threshold = 0.25;
-            sigma = 0.4;
-            //output_sigma_factor = 0.025;
-            output_sigma_factor = 0.1;  // 目标高斯带宽
+    cell_size = 4;          // HOG格子尺寸
 
-            _labCentroids = cv::Mat(nClusters, 3, CV_32FC1, &data); // lab
-            cell_sizeQ = cell_size*cell_size;   // cell size^2, to avoid repeated operations
-        }
-    }
-    else {   // RAW
-        interp_factor = 0.075;
-        sigma = 0.2;
-        cell_size = 1;
+    if (_labfeatures) {
+        interp_factor = 0.005;
+        interp_threshold = 0.25;
+        sigma = 0.4;
+        //output_sigma_factor = 0.025;
+        output_sigma_factor = 0.1;  // 目标高斯带宽
 
-        if (_labfeatures) {
-            printf("Lab features are only used with HOG features.\n");
-            _labfeatures = false;
-        }
+        _labCentroids = cv::Mat(nClusters, 3, CV_32FC1, &data); // lab
+        cell_sizeQ = cell_size * cell_size;   // cell size^2, to avoid repeated operations
     }
 
-    if (_multiscale) { // multiscale
-        template_size = 96; // make it small
-        //template_size = 100;
-        scale_step = 1.05;
-        scale_weight = 0.95;
-        if (!_fixed_window) {
-            printf("Multiscale does not support non-fixed window.\n");
-            _fixed_window = true;
-        }
-    }
-    else if (_fixed_window) {  // fit correction without multiscale
-        template_size = 96;
-        //template_size = 100;
-        scale_step = 1;
-    }
-    else {
-        template_size = 1;
-        scale_step = 1;
-    }
+    template_size = 96; // make it small
+    scale_step = 1.05;
+    scale_weight = 0.95;
 }
 
 // Initialize tracker
@@ -435,18 +404,6 @@ void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor)
 
     _tmpl = (1 - train_interp_factor) * _tmpl + (train_interp_factor) * x;
     _alphaf = (1 - train_interp_factor) * _alphaf + (train_interp_factor) * alphaf;
-
-
-    /*cv::Mat kf = fftd(gaussianCorrelation(x, x));
-    cv::Mat num = complexMultiplication(kf, _prob);
-    cv::Mat den = complexMultiplication(kf, kf + lambda);
-
-    _tmpl = (1 - train_interp_factor) * _tmpl + (train_interp_factor) * x;
-    _num = (1 - train_interp_factor) * _num + (train_interp_factor) * num;
-    _den = (1 - train_interp_factor) * _den + (train_interp_factor) * den;
-
-    _alphaf = complexDivision(_num, _den);*/
-
 }
 
 // Evaluates a Gaussian kernel with bandwidth SIGMA for all relative shifts between input images X and Y, which must both be MxN. They must    also be periodic (ie., pre-processed with a cosine window).
@@ -455,28 +412,20 @@ cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2)
     using namespace FFTTools;
     cv::Mat c = cv::Mat( cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0) );
     // HOG features
-    if (_hogfeatures) {
-        cv::Mat caux;
-        cv::Mat x1aux;
-        cv::Mat x2aux;
-        for (int i = 0; i < _size_patch[2]; i++) {
-            x1aux = x1.row(i);   // Procedure do deal with cv::Mat multichannel bug
-            x1aux = x1aux.reshape(1, _size_patch[0]);
-            x2aux = x2.row(i).reshape(1, _size_patch[0]);
-            cv::mulSpectrums(fftd(x1aux), fftd(x2aux), caux, 0, true);
-            caux = fftd(caux, true);
-            rearrange(caux);
-            caux.convertTo(caux,CV_32F);
-            c = c + real(caux);
-        }
+    cv::Mat caux;
+    cv::Mat x1aux;
+    cv::Mat x2aux;
+    for (int i = 0; i < _size_patch[2]; i++) {
+        x1aux = x1.row(i);   // Procedure do deal with cv::Mat multichannel bug
+        x1aux = x1aux.reshape(1, _size_patch[0]);
+        x2aux = x2.row(i).reshape(1, _size_patch[0]);
+        cv::mulSpectrums(fftd(x1aux), fftd(x2aux), caux, 0, true);
+        caux = fftd(caux, true);
+        rearrange(caux);
+        caux.convertTo(caux, CV_32F);
+        c = c + real(caux);
     }
-    // Gray features
-    else {
-        cv::mulSpectrums(fftd(x1), fftd(x2), c, 0, true);
-        c = fftd(c, true);
-        rearrange(c);
-        c = real(c);
-    }
+
     cv::Mat d;
     cv::max(( (cv::sum(x1.mul(x1))[0] + cv::sum(x2.mul(x2))[0])- 2. * c) / (_size_patch[0]*_size_patch[1]*_size_patch[2]) , 0, d);
 
@@ -536,17 +485,13 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
     }
 
     // HOG features
-    if (_hogfeatures) {
-        getHogFeatures(z, FeaturesMap); // 计算hog特征
+    getHogFeatures(z, FeaturesMap); // 计算hog特征
 
-        // Lab features
-        if (_labfeatures) {
-            getLabFeatures(z, FeaturesMap);
-        }
+    // Lab features
+    if (_labfeatures) {
+        getLabFeatures(z, FeaturesMap);
     }
-    else {
-        getGrayFeatures(z, FeaturesMap);
-    }
+
 
     if (inithann) {
         createHanningMats();    // 考虑可以预先生成_hann
@@ -642,30 +587,15 @@ void KCFTracker::setInitialTemplateSize(){
         _tmpl_sz.width = padded_w;
         _tmpl_sz.height = padded_h;
         _scale = 1;
-        // original code from paper:
-        /*if (sqrt(padded_w * padded_h) >= 100) {   //Normal size
-            _tmpl_sz.width = padded_w;
-            _tmpl_sz.height = padded_h;
-            _scale = 1;
-        }
-        else {   //ROI is too big, track at half size
-            _tmpl_sz.width = padded_w / 2;
-            _tmpl_sz.height = padded_h / 2;
-            _scale = 2;
-        }*/
     }
 
     // _tmpl_sz = {96, 48} cell_size = 4 则 _tmpl_sz = {104, 56}
-    if (_hogfeatures) {
-        // Round to cell size and also make it even
-        // 让_tmpl_sz为奇数个2*cell
-        _tmpl_sz.width = ( ( (int)(_tmpl_sz.width / (2 * cell_size)) ) * 2 * cell_size ) + cell_size*2;
-        _tmpl_sz.height = ( ( (int)(_tmpl_sz.height / (2 * cell_size)) ) * 2 * cell_size ) + cell_size*2;
-    }
-    else {  //Make number of pixels even (helps with some logic involving half-dimensions)
-        _tmpl_sz.width = (_tmpl_sz.width / 2) * 2;
-        _tmpl_sz.height = (_tmpl_sz.height / 2) * 2;
-    }
+
+    // Round to cell size and also make it even
+    // 让_tmpl_sz为奇数个2*cell
+    _tmpl_sz.width = (((int)(_tmpl_sz.width / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
+    _tmpl_sz.height = (((int)(_tmpl_sz.height / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
+
 }
 
 // Initialize Hanning window. Function called only in the first frame.
@@ -681,18 +611,12 @@ void KCFTracker::createHanningMats()
 
     const cv::Mat hann2d = hann2t * hann1t;
     // HOG features
-    if (_hogfeatures) {
-        const cv::Mat hann1d = hann2d.reshape(1,1); // Procedure do deal with cv::Mat multichannel bug
-        _hann = cv::Mat(cv::Size(_size_patch[0]*_size_patch[1], _size_patch[2]), CV_32F, cv::Scalar(0));
-        for (int i = 0; i < _size_patch[2]; i++) {
-            for (int j = 0; j<_size_patch[0]*_size_patch[1]; j++) {
-                _hann.at<float>(i,j) = hann1d.at<float>(0,j);
-            }
+    const cv::Mat hann1d = hann2d.reshape(1, 1); // Procedure do deal with cv::Mat multichannel bug
+    _hann = cv::Mat(cv::Size(_size_patch[0] * _size_patch[1], _size_patch[2]), CV_32F, cv::Scalar(0));
+    for (int i = 0; i < _size_patch[2]; i++) {
+        for (int j = 0; j < _size_patch[0] * _size_patch[1]; j++) {
+            _hann.at<float>(i, j) = hann1d.at<float>(0, j);
         }
-    }
-    // Gray features
-    else {
-        _hann = hann2d;
     }
 }
 
