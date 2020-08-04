@@ -139,9 +139,6 @@ protected:
     // Get lab features
     void getLabFeatures(const cv::Mat& z, cv::Mat& featureMap, int ele_num, int *size_patch);
 
-    // Get gray features
-    void getGrayFeatures(const cv::Mat& z, cv::Mat& featureMap);
-
     // Set initial template size, only runs in the first frame
     void setInitialTemplateSize();
 

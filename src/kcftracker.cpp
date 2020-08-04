@@ -692,14 +692,6 @@ void KCFTracker::getLabFeatures(const cv::Mat& z, cv::Mat& featureMap, int ele_n
     featureMap.push_back(outputLab);
 }
 
-void KCFTracker::getGrayFeatures(const cv::Mat& z, cv::Mat& featureMap){
-    featureMap = RectTools::getGrayImage(z);
-    featureMap -= (float) 0.5; // In Paper;
-    _size_patch[0] = z.rows;
-    _size_patch[1] = z.cols;
-    _size_patch[2] = 1;
-}
-
 void KCFTracker::setInitialTemplateSize(){
     const int padded_w = _roi.width * padding;
     const int padded_h = _roi.height * padding;
