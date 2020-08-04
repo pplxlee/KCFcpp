@@ -137,6 +137,56 @@ cv::Mat imag(cv::Mat img)
     return planes[1];
 }
 
+/// @brief a = a + real(b)
+/// @param a 
+/// @param b 
+/// @return a
+cv::Mat& addReal_float(cv::Mat& a, const cv::Mat& b)
+{
+    float* a_data = (float*)a.data;
+    float* b_data = (float*)b.data;
+
+    int ch = b.channels();
+
+    for (int i = 0; i < a.rows * a.cols; ++i)
+    {
+        a_data[i] += b_data[i * ch];
+    }
+
+    return a;
+}
+
+/// @brief rearrange(b); a = a + real(b)
+/// @param a 
+/// @param b 
+/// @return a
+cv::Mat& addRearrangeReal_float(cv::Mat& a, const cv::Mat& b)
+{
+    float* a_data = (float*)a.data;
+    float* b_data = (float*)b.data;
+
+    int ch = b.channels();
+
+    int cx = a.cols / 2;
+    int cy = a.rows / 2;
+
+    int delta_tl_br = cy * a.cols + cx;
+    int delta_tr_bl = cy * a.cols - cx;
+    int dalta[4] = { delta_tl_br , delta_tr_bl , -delta_tr_bl , -delta_tl_br };
+
+    int i = 0;
+    for (int y = 0; y < a.rows; ++y)
+    {
+        for (int x = 0; x < a.cols; ++x)
+        {
+            a_data[i] += b_data[(i + dalta[((y >= cy) << 1) | (x >= cx)]) * ch];
+            ++i;
+        }
+    }
+
+    return a;
+}
+
 cv::Mat magnitude(cv::Mat img)
 {
     cv::Mat res;
@@ -150,37 +200,45 @@ cv::Mat magnitude(cv::Mat img)
 
 cv::Mat complexMultiplication(cv::Mat a, cv::Mat b)
 {
-    std::vector<cv::Mat> pa;
-    std::vector<cv::Mat> pb;
-    cv::split(a, pa);
-    cv::split(b, pb);
+    cv::Mat res(cv::Size(a.cols, a.rows), CV_32FC2);
+    float* a_data = (float*)a.data;
+    float* b_data = (float*)b.data;
+    float* res_data = (float*)res.data;
 
-    std::vector<cv::Mat> pres;
-    pres.push_back(pa[0].mul(pb[0]) - pa[1].mul(pb[1]));
-    pres.push_back(pa[0].mul(pb[1]) + pa[1].mul(pb[0]));
+    int a_ch = a.channels();
+    int b_ch = b.channels();
 
-    cv::Mat res;
-    cv::merge(pres, res);
+    int num = a.cols * a.rows;
+    for (int i = 0; i < num; ++i)
+    {
+        auto i_a = i * a_ch;
+        auto i_b = i * b_ch;
+        res_data[i * 2] = a_data[i_a] * b_data[i_b] - a_data[i_a + 1] * b_data[i_b + 1];
+        res_data[i * 2 + 1] = a_data[i_a] * b_data[i_b + 1] - a_data[i_a + 1] * b_data[i_b];
+    }
 
     return res;
 }
 
 cv::Mat complexDivision(cv::Mat a, cv::Mat b)
 {
-    std::vector<cv::Mat> pa;
-    std::vector<cv::Mat> pb;
-    cv::split(a, pa);
-    cv::split(b, pb);
+    cv::Mat res(cv::Size(a.cols, a.rows), CV_32FC2);
+    float* a_data = (float*)a.data;
+    float* b_data = (float*)b.data;
+    float* res_data = (float*)res.data;
 
-    cv::Mat divisor = 1. / (pb[0].mul(pb[0]) + pb[1].mul(pb[1]));
+    int a_ch = a.channels();
+    int b_ch = b.channels();
 
-    std::vector<cv::Mat> pres;
-
-    pres.push_back((pa[0].mul(pb[0]) + pa[1].mul(pb[1])).mul(divisor));
-    pres.push_back((pa[1].mul(pb[0]) + pa[0].mul(pb[1])).mul(divisor));
-
-    cv::Mat res;
-    cv::merge(pres, res);
+    int num = a.cols * a.rows;
+    for (int i = 0; i < num; ++i)
+    {
+        auto i_a = i * a_ch;
+        auto i_b = i * b_ch;
+        float div = 1.f / (b_data[i_b] * b_data[i_b] + b_data[i_b + 1] * b_data[i_b + 1]);
+        res_data[i * 2] = (a_data[i_a] * b_data[i_b] - a_data[i_a + 1] * b_data[i_b + 1]) * div;
+        res_data[i * 2 + 1] = (a_data[i_a] * b_data[i_b + 1] - a_data[i_a + 1] * b_data[i_b]) * div;
+    }
     return res;
 }
 

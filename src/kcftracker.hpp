@@ -124,6 +124,7 @@ protected:
 
     // Evaluates a Gaussian kernel with bandwidth SIGMA for all relative shifts between input images X and Y, which must both be MxN. They must    also be periodic (ie., pre-processed with a cosine window).
     cv::Mat gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2);
+    cv::Mat gaussianCorrelation(const cv::Mat& x);
 
     // Create Gaussian Peak. Function called only in the first frame.
     cv::Mat createGaussianPeak(const size_t& sizey, const size_t& sizex);

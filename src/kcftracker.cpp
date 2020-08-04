@@ -88,6 +88,8 @@ the use of this software, even if advised of the possibility of such damage.
 #include "labdata.hpp"
 #endif
 
+#include "utils.hpp"
+
 #include <corecrt_math_defines.h>
 #include <iostream>
 #include <chrono>
@@ -399,7 +401,7 @@ void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor)
 {
     using namespace FFTTools;
 
-    const cv::Mat k = gaussianCorrelation(x, x);
+    const cv::Mat k = gaussianCorrelation(x);
     const cv::Mat alphaf = complexDivision(_prob, (fftd(k) + lambda));
 
     _tmpl = (1 - train_interp_factor) * _tmpl + (train_interp_factor) * x;
@@ -410,29 +412,59 @@ void KCFTracker::train(const cv::Mat& x, const float& train_interp_factor)
 cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x1, const cv::Mat& x2)
 {
     using namespace FFTTools;
-    cv::Mat c = cv::Mat( cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0) );
+    cv::Mat c = cv::Mat(cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0));
     // HOG features
     cv::Mat caux;
     cv::Mat x1aux;
     cv::Mat x2aux;
     for (int i = 0; i < _size_patch[2]; i++) {
-        x1aux = x1.row(i);   // Procedure do deal with cv::Mat multichannel bug
-        x1aux = x1aux.reshape(1, _size_patch[0]);
+        x1aux = x1.row(i).reshape(1, _size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
+        //x1aux = x1aux.reshape(1, _size_patch[0]);
         x2aux = x2.row(i).reshape(1, _size_patch[0]);
         cv::mulSpectrums(fftd(x1aux), fftd(x2aux), caux, 0, true);
         caux = fftd(caux, true);
-        rearrange(caux);
-        caux.convertTo(caux, CV_32F);
-        c = c + real(caux);
+        addRearrangeReal_float(c, caux);
     }
 
-    cv::Mat d;
-    cv::max(( (cv::sum(x1.mul(x1))[0] + cv::sum(x2.mul(x2))[0])- 2. * c) / (_size_patch[0]*_size_patch[1]*_size_patch[2]) , 0, d);
-
-    cv::Mat k;
-    cv::exp((-d / (sigma * sigma)), k);
-    return k;
+    float x1_x2_pow2_sum = sumPow2_ch1(x1) + sumPow2_ch1(x2);
+    float size_patch_den = 1.f / (_size_patch[0] * _size_patch[1] * _size_patch[2]);
+    float sigma_pow2_den = 1.f / (sigma * sigma);
+    float* c_data = (float*)c.data;
+    for (int i = 0; i < c.rows * c.cols; ++i)
+    {
+        float temp = x1_x2_pow2_sum - 2 * c_data[i];
+        c_data[i] = (temp > 0.f) ? expf(-temp * size_patch_den * sigma_pow2_den) : 1.f;
+    }
+    return c;
 }
+
+cv::Mat KCFTracker::gaussianCorrelation(const cv::Mat& x)
+{
+    using namespace FFTTools;
+    cv::Mat c = cv::Mat(cv::Size(_size_patch[1], _size_patch[0]), CV_32F, cv::Scalar(0));
+    // HOG features
+    cv::Mat caux;
+    cv::Mat xaux;
+    for (int i = 0; i < _size_patch[2]; i++) {
+        xaux = x.row(i).reshape(1, _size_patch[0]);   // Procedure do deal with cv::Mat multichannel bug
+        cv::Mat xaux_fftd = fftd(xaux);
+        cv::mulSpectrums(xaux_fftd, xaux_fftd, caux, 0, true);
+        caux = fftd(caux, true);
+        addRearrangeReal_float(c, caux);
+    }
+
+    float x_x_pow2_sum = 2 * sumPow2_ch1(x);
+    float size_patch_den = 1.f / (_size_patch[0] * _size_patch[1] * _size_patch[2]);
+    float sigma_pow2_den = 1.f / (sigma * sigma);
+    float* c_data = (float*)c.data;
+    for (int i = 0; i < c.rows * c.cols; ++i)
+    {
+        float temp = x_x_pow2_sum - 2 * c_data[i];
+        c_data[i] = (temp > 0.f) ? expf(-temp * size_patch_den * sigma_pow2_den) : 1.f;
+    }
+    return c;
+}
+
 
 // Create Gaussian Peak. Function called only in the first frame.
 cv::Mat KCFTracker::createGaussianPeak(const size_t& sizey, const size_t& sizex)
@@ -445,12 +477,14 @@ cv::Mat KCFTracker::createGaussianPeak(const size_t& sizey, const size_t& sizex)
     float output_sigma = std::sqrt((float) sizex * sizey) / padding * output_sigma_factor;
     float mult = -0.5 / (output_sigma * output_sigma);
 
+    float* res_data = (float*)res.data;
+    size_t index = 0;
     for (size_t i = 0; i < sizey; i++)
         for (size_t j = 0; j < sizex; j++)
         {
             const size_t ih = i - syh;
             const size_t jh = j - sxh;
-            res(i, j) = std::exp(mult * (float) (ih * ih + jh * jh));
+            res_data[index++] = std::exp(mult * (float)(ih * ih + jh * jh));
         }
     return FFTTools::fftd(res);
 }
@@ -492,11 +526,11 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, cons
         getLabFeatures(z, FeaturesMap);
     }
 
-
     if (inithann) {
         createHanningMats();    // 考虑可以预先生成_hann
     }
-    FeaturesMap = _hann.mul(FeaturesMap);
+    //FeaturesMap = _hann.mul(FeaturesMap);
+    mul(FeaturesMap, _hann);
     return FeaturesMap;
 }
 
