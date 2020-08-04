@@ -115,7 +115,7 @@ public:
     std::mutex mtx;
     std::condition_variable cond;
 
-    KCFTracker::MultiThreadHelper() 
+    MultiThreadHelper() 
         : thread_pool(2)
         , peak_values{}
         , res_pos{}
@@ -152,10 +152,6 @@ void KCFTracker::setParameters(){
     interp_factor = 0.012;  // 用于适应的线性插值因子
     interp_threshold = 0.4;
     sigma = 0.6;            // 高斯核带宽
-
-    // parameters used for the TPAMI
-    //interp_factor = 0.02;
-    //sigma = 0.5;
 
     cell_size = 4;          // HOG格子尺寸
 
