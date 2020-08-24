@@ -135,6 +135,105 @@ inline cv::Mat getGrayImage(cv::Mat img)
     return img;
 }
 
+// template_img should be pre-allocated memory
+inline void getTemplate(const cv::Mat& img, cv::Mat& template_img, const cv::Rect roi)
+{
+    assert(!template_img.empty());
+    float scale_w = roi.width / (float)template_img.cols;
+    float scale_h = roi.height / (float)template_img.rows;
+    uchar* iptr = img.data;
+    uchar* tptr = template_img.data;
+    float map_x, map_y;
+    int mx[2], my[2];
+    int index[4];
+    float w[4];
+    uchar color[4][3];
+    for (int y = 0; y < template_img.rows; ++y)
+    {
+        for (int x = 0; x < template_img.cols; ++x)
+        {
+            map_x = roi.x + x * scale_w;
+            map_y = roi.y + y * scale_h;
+
+            if (map_x < 0)
+            {
+                mx[0] = 0;
+                mx[1] = 0;
+                w[0] = 1.;
+                w[1] = 0.;
+            }
+            else if (map_x >= img.cols - 1)
+            {
+                mx[0] = img.cols - 1;
+                mx[1] = img.cols - 1;
+                w[0] = 1.;
+                w[1] = 0.;
+            }
+            else
+            {
+                mx[0] = cvFloor(map_x);
+                mx[1] = mx[0] + 1;
+                w[0] = mx[1] - map_x;
+                w[1] = 1 - w[0];
+            }
+
+            if (map_y < 0)
+            {
+                my[0] = 0;
+                my[1] = 0;
+                w[2] = 1.;
+                w[3] = 0.;
+            }
+            else if (map_y >= img.rows - 1)
+            {
+                my[0] = img.rows - 1;
+                my[1] = img.rows - 1;
+                w[2] = 1.;
+                w[3] = 0.;
+            }
+            else
+            {
+                my[0] = cvFloor(map_y);
+                my[1] = my[0] + 1;
+                w[2] = my[1] - map_y;
+                w[3] = 1 - w[2];
+            }
+
+            // 0 1
+            // 2 3
+            index[0] = (my[0] * img.cols + mx[0]) * 3;
+            index[1] = (my[0] * img.cols + mx[1]) * 3;
+            index[2] = (my[1] * img.cols + mx[0]) * 3;
+            index[3] = (my[1] * img.cols + mx[1]) * 3;
+
+            color[0][0] = iptr[index[0]];
+            color[0][1] = iptr[index[0] + 1];
+            color[0][2] = iptr[index[0] + 2];
+
+            color[1][0] = iptr[index[1]];
+            color[1][1] = iptr[index[1] + 1];
+            color[1][2] = iptr[index[1] + 2];
+
+            color[2][0] = iptr[index[2]];
+            color[2][1] = iptr[index[2] + 1];
+            color[2][2] = iptr[index[2] + 2];
+
+            color[3][0] = iptr[index[3]];
+            color[3][1] = iptr[index[3] + 1];
+            color[3][2] = iptr[index[3] + 2];
+
+            tptr[0] = (color[0][0] * w[0] + color[1][0] * w[1]) * w[2] + 
+                (color[2][0] * w[0] + color[3][0] * w[1]) * w[3];
+            tptr[1] = (color[0][1] * w[0] + color[1][1] * w[1]) * w[2] +
+                (color[2][1] * w[0] + color[3][1] * w[1]) * w[3];
+            tptr[2] = (color[0][2] * w[0] + color[1][2] * w[1]) * w[2] +
+                (color[2][2] * w[0] + color[3][2] * w[1]) * w[3];
+            tptr += 3;
+        }
+    }
+
+}
+
 }
 
 

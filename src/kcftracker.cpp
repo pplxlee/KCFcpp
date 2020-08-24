@@ -146,8 +146,8 @@ KCFTracker::~KCFTracker()
     delete multi_thread_helper_;
 }
 
-void KCFTracker::setParameters(){
-
+void KCFTracker::setParameters()
+{
     // VOT dataset evaluation
     interp_factor = 0.012;  // 用于适应的线性插值因子
     interp_threshold = 0.4;
@@ -185,7 +185,7 @@ void KCFTracker::init(const cv::Rect &roi, const cv::Mat& image)
             / std::chrono::steady_clock::duration::period::den;
         auto start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-        _tmpl = getFeatures(image, 1, _size_patch);
+        _tmpl = getFeatures(image, _tmplate_img[0], 1, _size_patch);
 #ifdef TIME_TEST
         // 计时结束并打印计时
         auto end = std::chrono::steady_clock::now();
@@ -270,7 +270,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
             multi_thread_helper_->mtx.unlock();
             multi_thread_helper_->thread_pool.execute([this, &image] {
                 thread_local static int size_patch[3];
-                auto features = getFeatures(image, false, size_patch, 1.0f / scale_step);
+                auto features = getFeatures(image, _tmplate_img[0], false, size_patch, 1.0f / scale_step);
                 multi_thread_helper_->res_pos[1] = detect(_tmpl, features, multi_thread_helper_->peak_values[1], size_patch);
                 multi_thread_helper_->mtx.lock();
                 if ((++multi_thread_helper_->processed_cnt) >= 2)
@@ -285,7 +285,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
             });
             multi_thread_helper_->thread_pool.execute([this, &image] {
                 thread_local static int size_patch[3];
-                auto features = getFeatures(image, false, size_patch, scale_step);
+                auto features = getFeatures(image, _tmplate_img[1], false, size_patch, scale_step);
                 multi_thread_helper_->res_pos[2] = detect(_tmpl, features, multi_thread_helper_->peak_values[2], size_patch);
                 multi_thread_helper_->mtx.lock();
                 if ((++multi_thread_helper_->processed_cnt) >= 2)
@@ -299,7 +299,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
                 }
             });
 
-            auto features = getFeatures(image, false, _size_patch, 1.0f);
+            auto features = getFeatures(image, _tmplate_img[2], false, _size_patch, 1.0f);
             multi_thread_helper_->res_pos[0] = detect(_tmpl, features, multi_thread_helper_->peak_values[0], _size_patch);
             multi_thread_helper_->mtx.lock();
             if ((multi_thread_helper_->processed_cnt) < 2)
@@ -340,7 +340,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 #ifdef TIME_TEST
             start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-            auto features = getFeatures(image, 0, _size_patch, 1.0f);
+            auto features = getFeatures(image, _tmplate_img[0], 0, _size_patch, 1.0f);
 #ifdef TIME_TEST
             end = std::chrono::steady_clock::now();
             cout << "Update getFeatures 1: "
@@ -365,7 +365,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 #ifdef TIME_TEST
             start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-            auto features = getFeatures(image, 0, _size_patch, 1.0f / scale_step);
+            auto features = getFeatures(image, _tmplate_img[1], 0, _size_patch, 1.0f / scale_step);
 #ifdef TIME_TEST
             end = std::chrono::steady_clock::now();
             cout << "Update getFeatures 2: "
@@ -394,7 +394,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 #ifdef TIME_TEST
             start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-            features = getFeatures(image, 0, _size_patch, scale_step);
+            features = getFeatures(image, _tmplate_img[2], 0, _size_patch, scale_step);
 #ifdef TIME_TEST
             end = std::chrono::steady_clock::now();
             cout << "Update getFeatures 3: "
@@ -437,7 +437,7 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 #ifdef TIME_TEST
     start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-    cv::Mat x = getFeatures(image, 0, _size_patch);
+    cv::Mat x = getFeatures(image, _tmplate_img[0], 0, _size_patch);
 #ifdef TIME_TEST
     end = std::chrono::steady_clock::now();
     cout << "Update getFeatures x: "
@@ -582,7 +582,7 @@ cv::Mat KCFTracker::createGaussianPeak(const size_t& sizey, const size_t& sizex)
 }
 
 // Obtain sub-window from image, with replication-padding and extract features
-cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, int* size_patch, const float& scale_adjust)
+cv::Mat KCFTracker::getFeatures(const cv::Mat& image, cv::Mat& tmplate_img, const bool& inithann, int* size_patch, const float& scale_adjust)
 {
     cv::Rect extracted_roi;
 
@@ -602,20 +602,25 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, const bool& inithann, int*
     extracted_roi.y = cy - extracted_roi.height / 2;
 
     cv::Mat FeaturesMap;
-    // z为模版图片
-    cv::Mat z = RectTools::subwindow(image, extracted_roi, cv::BORDER_REPLICATE);
 
-    // 将z缩放为模版大小
-    if (z.cols != _tmpl_sz.width || z.rows != _tmpl_sz.height) {
-        cv::resize(z, z, _tmpl_sz);
-    }
+    // 将图片线性插值写入_tmplate_img
+    float scale = scale_adjust * _scale;
+    RectTools::getTemplate(image, tmplate_img, extracted_roi);
+
+    //// z为模版图片
+    //cv::Mat z = RectTools::subwindow(image, extracted_roi, cv::BORDER_REPLICATE);
+
+    //// 将z缩放为模版大小
+    //if (z.cols != _tmpl_sz.width || z.rows != _tmpl_sz.height) {
+    //    cv::resize(z, z, _tmpl_sz);
+    //}
 
     // HOG features
-    getHogFeatures(z, FeaturesMap, size_patch); // 计算hog特征
+    getHogFeatures(tmplate_img, FeaturesMap, size_patch); // 计算hog特征
 
     // Lab features
     if (_labfeatures) {
-        getLabFeatures(z, FeaturesMap, size_patch[0] * size_patch[1], size_patch);
+        getLabFeatures(tmplate_img, FeaturesMap, size_patch[0] * size_patch[1], size_patch);
     }
 
     if (inithann) {
@@ -693,20 +698,14 @@ void KCFTracker::setInitialTemplateSize(){
     const int padded_h = _roi.height * padding;
 
     // template_size = 96 padded = {192, 96} 则 _scale = 2 _tmpl_sz = {96, 48}
-    if (template_size > 1) {  // Fit largest dimension to the given template size
-        if (padded_w >= padded_h)  //fit to width
-            _scale = padded_w / (float) template_size;
-        else
-            _scale = padded_h / (float) template_size;
+    // Fit largest dimension to the given template size
+    if (padded_w >= padded_h)  //fit to width
+        _scale = padded_w / (float)template_size;
+    else
+        _scale = padded_h / (float)template_size;
 
-        _tmpl_sz.width = padded_w / _scale;
-        _tmpl_sz.height = padded_h / _scale;
-    }
-    else {  //No template size given, use ROI size
-        _tmpl_sz.width = padded_w;
-        _tmpl_sz.height = padded_h;
-        _scale = 1;
-    }
+    _tmpl_sz.width = padded_w / _scale;
+    _tmpl_sz.height = padded_h / _scale;
 
     // _tmpl_sz = {96, 48} cell_size = 4 则 _tmpl_sz = {104, 56}
 
@@ -715,6 +714,9 @@ void KCFTracker::setInitialTemplateSize(){
     _tmpl_sz.width = (((int)(_tmpl_sz.width / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
     _tmpl_sz.height = (((int)(_tmpl_sz.height / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
 
+    _tmplate_img[0].create(_tmpl_sz, CV_8UC3);
+    _tmplate_img[1].create(_tmpl_sz, CV_8UC3);
+    _tmplate_img[2].create(_tmpl_sz, CV_8UC3);
 }
 
 // Initialize Hanning window. Function called only in the first frame.

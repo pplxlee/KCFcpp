@@ -131,7 +131,7 @@ protected:
     cv::Mat createGaussianPeak(const size_t& sizey, const size_t& sizex);
 
     // Obtain sub-window from image, with replication-padding and extract features
-    cv::Mat getFeatures(const cv::Mat& image, const bool& inithann, int* size_patch, const float& scale_adjust = 1.0f);
+    cv::Mat getFeatures(const cv::Mat& image, cv::Mat& tmplate_img, const bool& inithann, int* size_patch, const float& scale_adjust = 1.0f);
 
     // Get hog features
     void getHogFeatures(const cv::Mat& z, cv::Mat& featureMap, int *size_patch);
@@ -165,10 +165,9 @@ private:
     cv::Size _tmpl_sz;
     float _scale;
     int _gaussian_size;
-    //bool _hogfeatures;
     bool _labfeatures;
-    //bool _multiscale;
-    //bool _fixed_window;
+
+    cv::Mat _tmplate_img[3];
 
     class MultiThreadHelper;
     MultiThreadHelper *multi_thread_helper_;
