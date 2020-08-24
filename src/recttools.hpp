@@ -36,7 +36,6 @@ the use of this software, even if advised of the possibility of such damage.
 #pragma once
 
 #include <opencv2/imgproc/types_c.h>
-//#include <cv.h>
 #include <math.h>
 
 #ifndef _OPENCV_RECTTOOLS_HPP_
@@ -136,67 +135,69 @@ inline cv::Mat getGrayImage(cv::Mat img)
 }
 
 // template_img should be pre-allocated memory
-inline void getTemplate(const cv::Mat& img, cv::Mat& template_img, const cv::Rect roi)
+// scale the img's roi to template_img
+// bilinear
+inline void scaleRoiImg(const cv::Mat& img, cv::Mat& template_img, const cv::Rect roi)
 {
+    constexpr static int FIX_POINT_BASE = 10;
+
     assert(!template_img.empty());
-    float scale_w = roi.width / (float)template_img.cols;
-    float scale_h = roi.height / (float)template_img.rows;
+    assert(img.channels() == 3 && template_img.channels() == 3);
+
+    int scale_w = (roi.width << FIX_POINT_BASE) / template_img.cols;
+    int scale_h = (roi.height << FIX_POINT_BASE) / template_img.rows;
     uchar* iptr = img.data;
     uchar* tptr = template_img.data;
-    float map_x, map_y;
+    int map_x, map_y;
     int mx[2], my[2];
     int index[4];
-    float w[4];
+    int w[4];
     uchar color[4][3];
     for (int y = 0; y < template_img.rows; ++y)
     {
         for (int x = 0; x < template_img.cols; ++x)
         {
-            map_x = roi.x + x * scale_w;
-            map_y = roi.y + y * scale_h;
+            map_x = (roi.x << FIX_POINT_BASE) + x * scale_w;
+            map_y = (roi.y << FIX_POINT_BASE) + y * scale_h;
 
             if (map_x < 0)
             {
-                mx[0] = 0;
-                mx[1] = 0;
-                w[0] = 1.;
-                w[1] = 0.;
+                mx[0] = mx[1] = 0;
+                w[0] = 1 << FIX_POINT_BASE;
+                w[1] = 0;
             }
-            else if (map_x >= img.cols - 1)
+            else if (map_x >= ((img.cols - 1) << FIX_POINT_BASE))
             {
-                mx[0] = img.cols - 1;
-                mx[1] = img.cols - 1;
-                w[0] = 1.;
-                w[1] = 0.;
+                mx[0] = mx[1] = img.cols - 1;
+                w[0] = 1 << FIX_POINT_BASE;
+                w[1] = 0;
             }
             else
             {
-                mx[0] = cvFloor(map_x);
+                mx[0] = map_x >> FIX_POINT_BASE;
                 mx[1] = mx[0] + 1;
-                w[0] = mx[1] - map_x;
-                w[1] = 1 - w[0];
+                w[0] = (mx[1] << FIX_POINT_BASE) - map_x;
+                w[1] = (1 << FIX_POINT_BASE) - w[0];
             }
 
             if (map_y < 0)
             {
-                my[0] = 0;
-                my[1] = 0;
-                w[2] = 1.;
-                w[3] = 0.;
+                my[0] = my[1] = 0;
+                w[2] = 1 << FIX_POINT_BASE;
+                w[3] = 0;
             }
-            else if (map_y >= img.rows - 1)
+            else if (map_y >= ((img.rows - 1) << FIX_POINT_BASE))
             {
-                my[0] = img.rows - 1;
-                my[1] = img.rows - 1;
-                w[2] = 1.;
-                w[3] = 0.;
+                my[0] = my[1] = img.rows - 1;
+                w[2] = 1 << FIX_POINT_BASE;
+                w[3] = 0;
             }
             else
             {
-                my[0] = cvFloor(map_y);
+                my[0] = map_y >> FIX_POINT_BASE;
                 my[1] = my[0] + 1;
-                w[2] = my[1] - map_y;
-                w[3] = 1 - w[2];
+                w[2] = (my[1] << FIX_POINT_BASE) - map_y;
+                w[3] = (1 << FIX_POINT_BASE) - w[2];
             }
 
             // 0 1
@@ -222,16 +223,16 @@ inline void getTemplate(const cv::Mat& img, cv::Mat& template_img, const cv::Rec
             color[3][1] = iptr[index[3] + 1];
             color[3][2] = iptr[index[3] + 2];
 
-            tptr[0] = (color[0][0] * w[0] + color[1][0] * w[1]) * w[2] + 
-                (color[2][0] * w[0] + color[3][0] * w[1]) * w[3];
-            tptr[1] = (color[0][1] * w[0] + color[1][1] * w[1]) * w[2] +
-                (color[2][1] * w[0] + color[3][1] * w[1]) * w[3];
-            tptr[2] = (color[0][2] * w[0] + color[1][2] * w[1]) * w[2] +
-                (color[2][2] * w[0] + color[3][2] * w[1]) * w[3];
+            tptr[0] = ((color[0][0] * w[0] + color[1][0] * w[1]) * w[2] +
+                (color[2][0] * w[0] + color[3][0] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+            tptr[1] = ((color[0][1] * w[0] + color[1][1] * w[1]) * w[2] +
+                (color[2][1] * w[0] + color[3][1] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+            tptr[2] = ((color[0][2] * w[0] + color[1][2] * w[1]) * w[2] +
+                (color[2][2] * w[0] + color[3][2] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+
             tptr += 3;
         }
     }
-
 }
 
 }

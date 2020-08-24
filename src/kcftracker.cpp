@@ -605,7 +605,7 @@ cv::Mat KCFTracker::getFeatures(const cv::Mat& image, cv::Mat& tmplate_img, cons
 
     // 将图片线性插值写入_tmplate_img
     float scale = scale_adjust * _scale;
-    RectTools::getTemplate(image, tmplate_img, extracted_roi);
+    RectTools::scaleRoiImg(image, tmplate_img, extracted_roi);
 
     //// z为模版图片
     //cv::Mat z = RectTools::subwindow(image, extracted_roi, cv::BORDER_REPLICATE);
