@@ -152,7 +152,6 @@ inline void scaleRoiImg(const cv::Mat& img, cv::Mat& template_img, const cv::Rec
     int mx[2], my[2];
     int index[4];
     int w[4];
-    uchar color[4][3];
     for (int y = 0; y < template_img.rows; ++y)
     {
         for (int x = 0; x < template_img.cols; ++x)
@@ -207,28 +206,12 @@ inline void scaleRoiImg(const cv::Mat& img, cv::Mat& template_img, const cv::Rec
             index[2] = (my[1] * img.cols + mx[0]) * 3;
             index[3] = (my[1] * img.cols + mx[1]) * 3;
 
-            color[0][0] = iptr[index[0]];
-            color[0][1] = iptr[index[0] + 1];
-            color[0][2] = iptr[index[0] + 2];
-
-            color[1][0] = iptr[index[1]];
-            color[1][1] = iptr[index[1] + 1];
-            color[1][2] = iptr[index[1] + 2];
-
-            color[2][0] = iptr[index[2]];
-            color[2][1] = iptr[index[2] + 1];
-            color[2][2] = iptr[index[2] + 2];
-
-            color[3][0] = iptr[index[3]];
-            color[3][1] = iptr[index[3] + 1];
-            color[3][2] = iptr[index[3] + 2];
-
-            tptr[0] = ((color[0][0] * w[0] + color[1][0] * w[1]) * w[2] +
-                (color[2][0] * w[0] + color[3][0] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
-            tptr[1] = ((color[0][1] * w[0] + color[1][1] * w[1]) * w[2] +
-                (color[2][1] * w[0] + color[3][1] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
-            tptr[2] = ((color[0][2] * w[0] + color[1][2] * w[1]) * w[2] +
-                (color[2][2] * w[0] + color[3][2] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+            tptr[0] = ((iptr[index[0]] * w[0] + iptr[index[1]] * w[1]) * w[2] +
+                (iptr[index[2]] * w[0] + iptr[index[3]] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+            tptr[1] = ((iptr[index[0] + 1] * w[0] + iptr[index[1] + 1] * w[1]) * w[2] +
+                (iptr[index[2] + 1] * w[0] + iptr[index[3] + 1] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
+            tptr[2] = ((iptr[index[0] + 2] * w[0] + iptr[index[1] + 2] * w[1]) * w[2] +
+                (iptr[index[2] + 2] * w[0] + iptr[index[3] + 2] * w[1]) * w[3]) >> (2 * FIX_POINT_BASE);
 
             tptr += 3;
         }
