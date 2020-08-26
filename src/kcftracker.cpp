@@ -434,26 +434,28 @@ cv::Rect KCFTracker::update(const cv::Mat& image, float& prob)
 
     assert(_roi.width >= 0 && _roi.height >= 0);
 
+    if (prob > interp_threshold)
+    {
 #ifdef TIME_TEST
-    start = std::chrono::steady_clock::now();
+        start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-    cv::Mat x = getFeatures(image, _tmplate_img[0], 0, _size_patch);
+        cv::Mat x = getFeatures(image, _tmplate_img[0], 0, _size_patch);
 #ifdef TIME_TEST
-    end = std::chrono::steady_clock::now();
-    cout << "Update getFeatures x: "
-        << (end - start).count() * ratio << endl;
+        end = std::chrono::steady_clock::now();
+        cout << "Update getFeatures x: "
+            << (end - start).count() * ratio << endl;
 #endif // TIME_TEST
 
 #ifdef TIME_TEST
-    start = std::chrono::steady_clock::now();
+        start = std::chrono::steady_clock::now();
 #endif // TIME_TEST
-    if(prob > interp_threshold)
         train(x, interp_factor, _size_patch);
 #ifdef TIME_TEST
-    end = std::chrono::steady_clock::now();
-    cout << "Update train x: "
-        << (end - start).count() * ratio << endl;
+        end = std::chrono::steady_clock::now();
+        cout << "Update train x: "
+            << (end - start).count() * ratio << endl;
 #endif // TIME_TEST
+    }
 
     return _roi;
 }
