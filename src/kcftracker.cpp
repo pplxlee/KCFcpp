@@ -716,6 +716,10 @@ void KCFTracker::setInitialTemplateSize(){
     _tmpl_sz.width = (((int)(_tmpl_sz.width / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
     _tmpl_sz.height = (((int)(_tmpl_sz.height / (2 * cell_size))) * 2 * cell_size) + cell_size * 2;
 
+    // 防止出现特征尺寸小于0导致崩溃
+    _tmpl_sz.width = (_tmpl_sz.width >= 3 * cell_size) ? _tmpl_sz.width : 3 * cell_size;
+    _tmpl_sz.height = (_tmpl_sz.height >= 3 * cell_size)  ? _tmpl_sz.height : 3 * cell_size;
+
     _tmplate_img[0].create(_tmpl_sz, CV_8UC3);
     _tmplate_img[1].create(_tmpl_sz, CV_8UC3);
     _tmplate_img[2].create(_tmpl_sz, CV_8UC3);
